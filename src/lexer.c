@@ -186,6 +186,12 @@ lexer_handle_str (struct LexerContext *ctx)
                      end_col);
 }
 
+static int
+is_symbol_char (char c)
+{
+  return isalnum (c) || strchr ("!$%&*+-./:<=>?@^_~", c) != NULL;
+}
+
 static struct Token
 lexer_handle_symbol (struct LexerContext *ctx)
 {
@@ -251,12 +257,6 @@ lexer_handle_error (struct LexerContext *ctx)
   snprintf (error_msg, sizeof (error_msg), "Illegal character: '%s'", lexeme);
   return make_error_token (error_msg, start_line, start_col, end_line,
                            end_col);
-}
-
-static int
-is_symbol_char (char c)
-{
-  return isalnum (c) || strchr ("!$%&*+-./:<=>?@^_~", c) != NULL;
 }
 
 struct LexerContext
