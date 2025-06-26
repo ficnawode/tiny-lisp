@@ -21,7 +21,8 @@ main (int argc, char **argv)
                                                           // symbol
 
   struct ParserContext parser = parser_make (source_code);
-  struct ExprList *ast = parse_program (&parser);
-  pretty_print_ast (ast);
+  struct ExprVector ast = parse_program (&parser);
+  pretty_print_ast (&ast);
+  exprvector_cleanup (&ast);
   return 0;
 }

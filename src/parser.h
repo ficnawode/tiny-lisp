@@ -15,11 +15,11 @@ void parser_error (struct ParserContext *ctx, const char *message);
 void parser_advance (struct ParserContext *ctx);
 void parser_cleanup (struct ParserContext *ctx);
 
-struct ExprList *parse_program (struct ParserContext *ctx);
+struct ExprVector parse_program (struct ParserContext *ctx);
 
-struct Expr *parse_expr (struct ParserContext *ctx);
-struct Expr *parse_atom (struct ParserContext *ctx);
-struct Expr *parse_list (struct ParserContext *ctx);
-struct Expr *parse_quoted_expression (struct ParserContext *ctx);
+struct Expr parse_expr (struct ParserContext *ctx);
+struct Expr parse_atom (struct ParserContext *ctx);
+struct Expr parse_list (struct ParserContext *ctx);
+struct Expr parse_quoted_expression (struct ParserContext *ctx);
 
 #endif

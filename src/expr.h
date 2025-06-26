@@ -6,7 +6,7 @@
 
 struct Expr;
 struct Atom;
-struct ExprList;
+struct ExprVector;
 
 struct Atom
 {
@@ -25,6 +25,19 @@ struct Atom
   } value;
 };
 
+struct Atom atom_symbol_make (char *s);
+struct Atom atom_number_make (double d);
+struct Atom atom_string_make (char *s);
+
+void atom_cleanup (struct Atom *a);
+
+struct ExprVector
+{
+  struct Expr *elements;
+  size_t len;
+  size_t capacity;
+};
+
 struct Expr
 {
   enum ExprType
@@ -37,7 +50,7 @@ struct Expr
   union ExprValue
   {
     struct Atom atom_val;
-    struct ExprList *list_val;
+    struct ExprVector list_val;
     const char *error_msg;
   } val;
 
@@ -47,31 +60,18 @@ struct Expr
   size_t end_col;
 };
 
-struct Expr *expr_atom_create (struct Token *token);
-struct Expr *expr_list_create (struct ExprList *content, size_t start_line,
-                               size_t start_col, size_t end_line,
-                               size_t end_col);
+struct Expr expr_atom_make (struct Token *token);
+struct Expr expr_list_make (struct ExprVector content, size_t start_line,
+                            size_t start_col, size_t end_line, size_t end_col);
+void expr_cleanup (struct Expr *e);
 
-struct Atom atom_symbol_make (char *s);
-struct Atom atom_number_make (double d);
-struct Atom atom_string_make (char *s);
-
-void atom_cleanup (struct Atom *a);
-
-struct ExprList
-{
-  struct Expr **elements;
-  size_t len;
-  size_t capacity;
-};
-
-struct ExprList *exprlist_create (void);
-void exprlist_append (struct ExprList *list, struct Expr *expr);
-void exprlist_cleanup (struct ExprList *list);
+struct ExprVector exprvector_create (void);
+void exprvector_append (struct ExprVector *list, struct Expr expr);
+void exprvector_cleanup (struct ExprVector *list);
 
 void print_atom (struct Atom *atom);
-void print_exprlist (const struct ExprList *list, int depth);
+void print_exprvector (const struct ExprVector *list, int depth);
 void print_expr (const struct Expr *expr, int depth);
-void pretty_print_ast (const struct ExprList *program);
+void pretty_print_ast (const struct ExprVector *program);
 
 #endif
