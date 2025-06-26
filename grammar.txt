@@ -1,0 +1,51 @@
+(*
+ * Top-level structure: A Lisp program consists of zero or more S-expressions.
+ * Whitespace and comments are typically handled by the lexer before parsing
+ * and are implicitly allowed between any tokens. They are not explicitly part
+ * of the structural BNF rules below, as they are "skipped" rather than "parsed"
+ * into the abstract syntax tree.
+ *)
+<program> ::= <s_expression>* TOKEN_EOF
+
+(*
+ * S-expression: The fundamental building block in Lisp.
+ * It can be an atom, a list, or a quoted expression.
+ *)
+<s_expression> ::= <atom>
+                 | <list>
+                 | <quoted_expression>
+
+(*
+ * Atom: A non-compound S-expression.
+ * Directly corresponds to lexer tokens.
+ *)
+<atom> ::= TOKEN_SYMBOL
+         | TOKEN_NUMBER
+         | TOKEN_STRING
+
+(*
+ * List: A compound S-expression, enclosed in parentheses.
+ * It contains zero or more S-expressions.
+ *)
+<list> ::= TOKEN_LPAREN <s_expression>* TOKEN_RPAREN
+
+(*
+ * Quoted Expression: A syntactic sugar for (quote <s-expression>).
+ * The 'TOKEN_QUOTE' (apostrophe) is a reader macro.
+ *)
+<quoted_expression> ::= TOKEN_QUOTE <s_expression>
+
+(* --- Terminal Tokens (as provided by your lexer) --- *)
+(* Note: These are the actual tokens, not further decomposed in BNF *)
+TOKEN_LPAREN      ::= '('
+TOKEN_RPAREN      ::= ')'
+TOKEN_QUOTE       ::= "'"
+TOKEN_SYMBOL      ::= (* e.g., 'foo', '+', 'define', 'list?' - actual pattern handled by lexer *)
+TOKEN_NUMBER      ::= (* e.g., 123, -4.5, +0.7 - actual pattern handled by lexer *)
+TOKEN_STRING      ::= (* e.g., "hello world" - actual pattern handled by lexer *)
+
+(* --- Ignored Tokens (handled by lexer, not part of parse tree) --- *)
+TOKEN_WHITESPACE  ::= (* spaces, tabs, newlines *)
+TOKEN_COMMENT     ::= (* ; ... to end of line *)
+TOKEN_EOF         ::= (* End of File marker *)
+TOKEN_ERROR       ::= (* Lexing error - indicates failure, not valid syntax *)

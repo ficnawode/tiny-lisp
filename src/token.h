@@ -30,7 +30,7 @@ struct Token make_token (enum TokenType type, char *lexeme_buffer, int s_line,
 
 struct Token make_error_token (const char *message, int s_line, int s_col,
                                int e_line, int e_col);
-void free_token (struct Token *token);
+void token_cleanup (struct Token *token);
 
 const char *token_type_to_string (enum TokenType type);
 void print_token (struct Token *token);

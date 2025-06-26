@@ -48,9 +48,10 @@ make_error_token (const char *message, int s_line, int s_col, int e_line,
 }
 
 void
-free_token (struct Token *token)
+token_cleanup (struct Token *token)
 {
-  free (token->lexeme);
+  if (token->lexeme != NULL)
+    free (token->lexeme);
 }
 
 const char *
