@@ -4,12 +4,14 @@
 #include "parser.h"
 
 struct ParserContext
-parser_init (const char *source_code)
+parser_make (const char *source_code)
 {
 
   struct LexerContext lexer = lexer_init (source_code);
   struct Token starting_token = make_token (TOKEN_WHITESPACE, "", 0, 0, 0, 0);
-  struct ParserContext ctx = { lexer, starting_token };
+
+  struct ParserContext ctx
+      = { .lexer = lexer, .current_token = starting_token };
   parser_advance (&ctx);
   return ctx;
 }
@@ -40,7 +42,7 @@ parser_cleanup (struct ParserContext *ctx)
 struct ExprList *
 parse_program (struct ParserContext *ctx)
 {
-  struct ExprList *ast = exprlist_init_empty ();
+  struct ExprList *ast = exprlist_create ();
   while (ctx->current_token.type != TOKEN_EOF)
     {
       struct Expr *e = parse_expr (ctx);
@@ -89,7 +91,9 @@ parse_expr (struct ParserContext *ctx)
 struct Expr *
 parse_atom (struct ParserContext *ctx)
 {
-  struct Expr *atom_expr = expr_create_atom (&ctx->current_token);
+  struct Expr *atom_expr = expr_atom_create (&ctx->current_token);
+  if (atom_expr->type == S_TYPE_ERROR)
+    parser_error (ctx, atom_expr->val.error_msg);
   parser_advance (ctx);
   return atom_expr;
 }
@@ -100,7 +104,7 @@ parse_list (struct ParserContext *ctx)
 
   size_t start_line = ctx->current_token.start_line;
   size_t start_col = ctx->current_token.start_col;
-  struct ExprList *list = exprlist_init_empty ();
+  struct ExprList *list = exprlist_create ();
   parser_advance (ctx);
   while (ctx->current_token.type != TOKEN_RPAREN)
     {
@@ -110,7 +114,7 @@ parse_list (struct ParserContext *ctx)
   size_t end_line = ctx->current_token.end_line;
   size_t end_col = ctx->current_token.end_col;
   parser_advance (ctx);
-  return expr_create_list (list, start_line, start_col, end_line, end_col);
+  return expr_list_create (list, start_line, start_col, end_line, end_col);
 }
 
 struct Expr *
@@ -118,7 +122,7 @@ parse_quoted_expression (struct ParserContext *ctx)
 {
   size_t start_line = ctx->current_token.start_line;
   size_t start_col = ctx->current_token.start_col;
-  struct ExprList *list = exprlist_init_empty ();
+  struct ExprList *list = exprlist_create ();
 
   struct Token t = { .type = TOKEN_SYMBOL,
                      .lexeme = (char *)"quote",
@@ -126,7 +130,7 @@ parse_quoted_expression (struct ParserContext *ctx)
                      .start_col = start_col,
                      .end_line = start_line,
                      .end_col = start_col };
-  struct Expr *quote = expr_create_atom (&t);
+  struct Expr *quote = expr_atom_create (&t);
   exprlist_append (list, quote);
 
   struct Expr *e = parse_expr (ctx);
@@ -134,5 +138,5 @@ parse_quoted_expression (struct ParserContext *ctx)
 
   size_t end_line = ctx->current_token.end_line;
   size_t end_col = ctx->current_token.end_col;
-  return expr_create_list (list, start_line, start_col, end_line, end_col);
+  return expr_list_create (list, start_line, start_col, end_line, end_col);
 }

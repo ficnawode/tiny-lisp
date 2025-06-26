@@ -10,7 +10,7 @@ struct ParserContext
   struct Token current_token;
 };
 
-struct ParserContext parser_init (const char *source_code);
+struct ParserContext parser_make (const char *source_code);
 void parser_error (struct ParserContext *ctx, const char *message);
 void parser_advance (struct ParserContext *ctx);
 void parser_cleanup (struct ParserContext *ctx);

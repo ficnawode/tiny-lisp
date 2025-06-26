@@ -21,7 +21,7 @@ unquote_str (const char *lexeme)
 }
 
 struct Atom
-atom_create_symbol (char *s)
+atom_symbol_make (char *s)
 {
   struct Atom a;
   a.type = ATOM_TYPE_SYMBOL;
@@ -30,7 +30,7 @@ atom_create_symbol (char *s)
 }
 
 struct Atom
-atom_create_number (double d)
+atom_number_make (double d)
 {
   struct Atom a;
   a.type = ATOM_TYPE_NUMBER;
@@ -39,7 +39,7 @@ atom_create_number (double d)
 }
 
 struct Atom
-atom_create_string (char *s)
+atom_string_make (char *s)
 {
   struct Atom a;
   a.type = ATOM_TYPE_STRING;
@@ -58,7 +58,7 @@ atom_cleanup (struct Atom *a)
       free (a->value.string);
       return;
     case ATOM_TYPE_SYMBOL:
-      free (a->value.string);
+      free (a->value.symbol);
       return;
     default:
       return;
@@ -66,7 +66,7 @@ atom_cleanup (struct Atom *a)
 }
 
 struct Expr *
-expr_create_atom (struct Token *token)
+expr_atom_create (struct Token *token)
 {
 
   struct Expr *e = (struct Expr *)malloc (sizeof (struct Expr));
@@ -80,15 +80,15 @@ expr_create_atom (struct Token *token)
     case TOKEN_NUMBER:
       e->type = S_TYPE_ATOM;
       double d = strtod (token->lexeme, NULL);
-      e->val.atom_val = atom_create_number (d);
+      e->val.atom_val = atom_number_make (d);
       return e;
     case TOKEN_STRING:
       e->type = S_TYPE_ATOM;
-      e->val.atom_val = atom_create_string (token->lexeme);
+      e->val.atom_val = atom_string_make (token->lexeme);
       return e;
     case TOKEN_SYMBOL:
       e->type = S_TYPE_ATOM;
-      e->val.atom_val = atom_create_symbol (token->lexeme);
+      e->val.atom_val = atom_symbol_make (token->lexeme);
       return e;
     default:
       e->type = S_TYPE_ERROR;
@@ -98,7 +98,7 @@ expr_create_atom (struct Token *token)
 }
 
 struct Expr *
-expr_create_list (struct ExprList *content, size_t start_line,
+expr_list_create (struct ExprList *content, size_t start_line,
                   size_t start_col, size_t end_line, size_t end_col)
 {
 
@@ -131,7 +131,7 @@ expr_cleanup (struct Expr *e)
 }
 
 struct ExprList *
-exprlist_init_empty (void)
+exprlist_create (void)
 {
   const size_t LIST_INITIAL_CAPACITY = 8;
   struct ExprList *e = (struct ExprList *)malloc (sizeof (struct ExprList));
@@ -141,7 +141,7 @@ exprlist_init_empty (void)
   e->elements = (struct Expr **)malloc (e->capacity * sizeof (struct Expr *));
   if (e->elements == NULL)
     {
-      printf ("Parser Error: Failed to allocate expression list\n");
+      printf ("Failed to allocate expression list\n");
       exit (EXIT_FAILURE);
     }
   return e;
@@ -153,11 +153,11 @@ exprlist_append (struct ExprList *list, struct Expr *expr)
   if (list->len + 1 >= list->capacity)
     {
       int new_capacity = list->capacity * 2;
-      struct Expr**new_elements
-          = (struct Expr**)realloc (list->elements, new_capacity);
+      struct Expr **new_elements
+          = (struct Expr **)realloc (list->elements, new_capacity);
       if (new_elements == NULL)
         {
-          printf ("Parser Error: Failed to reallocate expression list\n");
+          printf ("Failed to reallocate expression list\n");
           exit (EXIT_FAILURE);
         }
       list->elements = new_elements;

@@ -10,7 +10,7 @@ make_token (enum TokenType type, char *lexeme_buffer, int s_line, int s_col,
 {
   struct Token token;
   token.type = type;
-  token.lexeme = strdup (lexeme_buffer); // Duplicate the content of the buffer
+  token.lexeme = strdup (lexeme_buffer);
   if (token.lexeme == NULL)
     {
       fprintf (stdout, "Lexer Error: Failed to duplicate lexeme string\n");

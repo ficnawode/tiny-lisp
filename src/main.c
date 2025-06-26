@@ -17,10 +17,10 @@ main (int argc, char **argv)
         "\n"
         "(display \"Hello, Lisp!\")\n"
         "(+ 10 -5 3.14 -0.001)\n"
-        "(* my-symbol 'another-symbol? 123foo bar-baz!)\n"; // 123foo should be
-                                                            // symbol
+        "(* my-symbol 'another-symbol? 123foo bar-baz!)"; // 123foo should be
+                                                          // symbol
 
-  struct ParserContext parser = parser_init (source_code);
+  struct ParserContext parser = parser_make (source_code);
   struct ExprList *ast = parse_program (&parser);
   pretty_print_ast (ast);
   return 0;
