@@ -166,7 +166,7 @@ exprvector_append (struct ExprVector *list, struct Expr expr)
 void
 exprvector_cleanup (struct ExprVector *list)
 {
-  for (int i = 0; i < list->len; i++)
+  for (size_t i = 0; i < list->len; i++)
     expr_cleanup (&list->elements[i]);
   free (list->elements);
 }
@@ -181,7 +181,7 @@ print_indent (int depth)
 }
 
 void
-print_atom (struct Atom *atom)
+print_atom (const struct Atom *atom)
 {
   if (atom == NULL)
     {

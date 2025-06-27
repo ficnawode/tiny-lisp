@@ -69,7 +69,7 @@ struct ExprVector exprvector_create (void);
 void exprvector_append (struct ExprVector *list, struct Expr expr);
 void exprvector_cleanup (struct ExprVector *list);
 
-void print_atom (struct Atom *atom);
+void print_atom (const struct Atom *atom);
 void print_exprvector (const struct ExprVector *list, int depth);
 void print_expr (const struct Expr *expr, int depth);
 void pretty_print_ast (const struct ExprVector *program);

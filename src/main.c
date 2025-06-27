@@ -1,5 +1,5 @@
+#include "compiler.h"
 #include "parser.h"
-
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -8,21 +8,17 @@
 int
 main (int argc, char **argv)
 {
-  const char *source_code
-      = "(define (fib n) ; This is a recursive fibonacci function\n"
-        "  (if (< n 2)\n"
-        "      n\n"
-        "      (+ (fib (- n 1))\n"
-        "         (fib (- n 2)))))\n"
-        "\n"
-        "(display \"Hello, Lisp!\")\n"
-        "(+ 10 -5 3.14 -0.001)\n"
-        "(* my-symbol 'another-symbol? 123foo bar-baz!)"; // 123foo should be
-                                                          // symbol
-
+  // clang-format off
+  const char *source_code = 
+        "(define z (+ 5 10))"
+  
+  ;
+  // clang-format on
   struct ParserContext parser = parser_make (source_code);
   struct ExprVector ast = parse_program (&parser);
   pretty_print_ast (&ast);
+  compile_program (&ast, "lisp_out");
   exprvector_cleanup (&ast);
+
   return 0;
 }
