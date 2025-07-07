@@ -8,17 +8,16 @@ BIN_DIR = bin
 CFLAGS = -Wall -Wextra -g -I$(SRC_DIR) 
 LDFLAGS =
 
-APP_SOURCES := $(wildcard $(SRC_DIR)/*.c)
+SOURCES := $(wildcard $(SRC_DIR)/*.c)
 
-APP_OBJECTS := $(APP_SOURCES:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
-ALL_OBJECTS := $(APP_OBJECTS) 
+OBJECTS := $(SOURCES:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 
 EXECUTABLE = $(BIN_DIR)/$(TARGET)
 
 
 all: $(EXECUTABLE)
 
-$(EXECUTABLE): $(ALL_OBJECTS)
+$(EXECUTABLE): $(OBJECTS)
 	@echo "Linking..."
 	@mkdir -p $(BIN_DIR)
 	$(CC) $(LDFLAGS) -o $@ $^
@@ -30,6 +29,10 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 
 clean:
 	@echo "Cleaning up..."
-	@rm -rf $(OBJ_DIR) $(BIN_DIR)
+	@rm -rf $(OBJ_DIR)/* $(BIN_DIR)/*
+
+cleaner: clean
+	@echo "Cleaning up and deleting all assembly files..."
+	@rm */*.o */*.s
 
 .PHONY: all clean 
