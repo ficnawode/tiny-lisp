@@ -18,6 +18,7 @@ static void compile_define_function (struct CompilerContext *ctx,
 static void compile_function_call (struct CompilerContext *ctx,
                                    struct SymbolInfo *op_info,
                                    struct ExprVector *vec);
+static size_t count_local_defines (struct ExprVector *define_expr_vec);
 
 static int
 new_label_id ()
@@ -200,6 +201,43 @@ compile_atom (struct CompilerContext *ctx, struct Atom *atom)
     }
 }
 
+/**
+ * @brief Scans a function definition expression to count local variable
+ * definitions.
+ * @param define_expr_vec The vector for the entire `(define (f ...) ...)`
+ * expression.
+ * @return The number of local `(define var val)` forms in the function body.
+ */
+static size_t
+count_local_defines (struct ExprVector *define_expr_vec)
+{
+  size_t count = 0;
+  // The body starts at index 2 of a (define (f ...) body...) expression
+  for (size_t i = 2; i < define_expr_vec->len; ++i)
+    {
+      struct Expr *stmt = &define_expr_vec->elements[i];
+      if (stmt->type == S_TYPE_LIST && stmt->val.list_val.len >= 2)
+        {
+          struct ExprVector *list = &stmt->val.list_val;
+          struct Expr *op = &list->elements[0];
+          struct Expr *name = &list->elements[1];
+
+          if (op->type == S_TYPE_ATOM
+              && op->val.atom_val.type == ATOM_TYPE_SYMBOL
+              && strcmp (op->val.atom_val.value.symbol, "define") == 0)
+            {
+              // Ensure it's a variable define `(define x ...)` and not a
+              // nested func define `(define (g) ...)`
+              if (name->type == S_TYPE_ATOM)
+                {
+                  count++;
+                }
+            }
+        }
+    }
+  return count;
+}
+
 static void
 compile_define_function (struct CompilerContext *ctx, struct ExprVector *vec)
 {
@@ -248,7 +286,14 @@ compile_define_function (struct CompilerContext *ctx, struct ExprVector *vec)
       exit (EXIT_FAILURE);
     }
 
-  int current_stack_offset = 0;
+  size_t num_locals = count_local_defines (vec);
+  size_t total_stack_vars = num_params + num_locals;
+
+  if (total_stack_vars > 0)
+    {
+      fprintf (ctx->gds->func_file, "  sub rsp, %zu\n", total_stack_vars * 8);
+    }
+
   for (size_t i = 0; i < num_params; ++i)
     {
       struct Expr *param_expr = &sig_vec->elements[i + 1];
@@ -256,25 +301,20 @@ compile_define_function (struct CompilerContext *ctx, struct ExprVector *vec)
 
       struct SymbolInfo *param_info
           = symbol_make_local_var (param_name, 0, param_expr);
-      current_stack_offset = symbol_table_define (ctx->sym_table, param_info);
+      int stack_offset = symbol_table_define (ctx->sym_table, param_info);
 
       fprintf (ctx->gds->func_file,
                "  ; Store parameter '%s' from %s to [rbp - %d]\n", param_name,
-               arg_registers[i], current_stack_offset);
-      fprintf (ctx->gds->func_file, "  mov [rbp - %d], %s\n",
-               current_stack_offset, arg_registers[i]);
-    }
-
-  if (current_stack_offset > 0)
-    {
-      fprintf (ctx->gds->func_file, "  sub rsp, %d\n", current_stack_offset);
+               arg_registers[i], stack_offset);
+      fprintf (ctx->gds->func_file, "  mov [rbp - %d], %s\n", stack_offset,
+               arg_registers[i]);
     }
 
   fprintf (ctx->gds->func_file, "\n  ; Function Body for %s\n", func_name);
 
   FILE *temp_text_file = ctx->gds->text_file;
   ctx->gds->text_file = ctx->gds->func_file;
-  ctx->gds->func_file = NULL;
+  ctx->gds->func_file = NULL; // Prevents compiling nested functions for now
   for (size_t i = 2; i < vec->len; ++i)
     {
       compile_expr (ctx, &vec->elements[i]);
@@ -283,7 +323,7 @@ compile_define_function (struct CompilerContext *ctx, struct ExprVector *vec)
   ctx->gds->text_file = temp_text_file;
 
   fprintf (ctx->gds->func_file, "\n  ; Epilogue for %s\n", func_name);
-  fprintf (ctx->gds->func_file, "  mov rsp, rbp\n");
+  fprintf (ctx->gds->func_file, "  mov rsp, rbp\n"); // Deallocate stack frame
   fprintf (ctx->gds->func_file, "  pop rbp\n");
   fprintf (ctx->gds->func_file, "  ret\n");
   fprintf (ctx->gds->func_file, "; ---- End Function: %s ----\n", func_name);
@@ -339,7 +379,6 @@ compile_function_call (struct CompilerContext *ctx, struct SymbolInfo *op_info,
         }
     }
 
-  // --- General case for User-Defined Functions ---
   const char *arg_registers[] = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
   if (num_args > 6)
     {
@@ -348,16 +387,16 @@ compile_function_call (struct CompilerContext *ctx, struct SymbolInfo *op_info,
       exit (EXIT_FAILURE);
     }
 
-  // push args to stack
-  fprintf (ctx->gds->text_file, "  ; Evaluate arguments\n");
+  fprintf (ctx->gds->text_file,
+           "  ; Evaluate arguments (push args to stack)\n");
   for (size_t i = 1; i <= num_args; ++i)
     {
       compile_expr (ctx, &vec->elements[i]);
       fprintf (ctx->gds->text_file, "  push rax\n");
     }
 
-  // pop args from stack
-  fprintf (ctx->gds->text_file, "  ; Load arguments into registers\n");
+  fprintf (ctx->gds->text_file,
+           "  ; Load arguments from stack into registers\n");
   for (int i = num_args - 1; i >= 0; --i)
     {
       fprintf (ctx->gds->text_file, "  pop %s\n", arg_registers[i]);
@@ -411,14 +450,16 @@ compile_list (struct CompilerContext *ctx, struct Expr *list_expr)
           struct Expr *name_part = &vec->elements[1];
 
           if (name_part->type == S_TYPE_ATOM)
-            {
+            { // This is (define var val)
               char *symbol_name = name_part->val.atom_val.value.symbol;
-              compile_expr (ctx, &vec->elements[2]);
-              fprintf (ctx->gds->text_file, "  push rax\n");
 
               if (ctx->sym_table->current_scope
                   == ctx->sym_table->global_scope)
                 {
+                  // --- Global Variable Definition ---
+                  compile_expr (ctx, &vec->elements[2]);
+                  fprintf (ctx->gds->text_file, "  push rax\n");
+
                   FILE *data = ctx->gds->data_file;
                   char label_buf[256];
                   sanitize_label (label_buf, sizeof (label_buf), "G_",
@@ -436,10 +477,24 @@ compile_list (struct CompilerContext *ctx, struct Expr *list_expr)
                            info->location.global_asm_label);
                   fprintf (ctx->gds->text_file, "  mov rax, rbx\n");
                 }
-              else
+              else // local variable
                 {
-                  fprintf (stderr, "Local 'define' is not yet supported.\n");
-                  exit (EXIT_FAILURE);
+                  fprintf (ctx->gds->text_file,
+                           "\n  ; Local define for '%s'\n", symbol_name);
+                  compile_expr (ctx, &vec->elements[2]);
+
+                  struct SymbolInfo *info
+                      = symbol_make_local_var (symbol_name, 0, name_part);
+                  int stack_offset
+                      = symbol_table_define (ctx->sym_table, info);
+
+                  fprintf (ctx->gds->text_file,
+                           "  mov [rbp - %d], rax ; move result from rax into "
+                           "its stack slot\n",
+                           stack_offset);
+
+                  fprintf (ctx->gds->text_file, "  mov rax, 0 ; Result of "
+                                                "define is undefined\n");
                 }
             }
           else if (name_part->type == S_TYPE_LIST)

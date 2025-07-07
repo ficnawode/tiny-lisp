@@ -39,14 +39,26 @@ parser_cleanup (struct ParserContext *ctx)
   lexer_cleanup (&ctx->lexer);
 }
 
+static void
+skip_whitespace_and_comments (struct ParserContext *ctx)
+{
+  while (ctx->current_token.type == TOKEN_WHITESPACE
+         || ctx->current_token.type == TOKEN_COMMENT)
+    {
+      parser_advance (ctx);
+    }
+}
+
 struct ExprVector
 parse_program (struct ParserContext *ctx)
 {
   struct ExprVector ast = exprvector_create ();
+  skip_whitespace_and_comments (ctx);
   while (ctx->current_token.type != TOKEN_EOF)
     {
       struct Expr e = parse_expr (ctx);
       exprvector_append (&ast, e);
+      skip_whitespace_and_comments (ctx);
     }
   return ast;
 }
@@ -65,17 +77,9 @@ parse_expr (struct ParserContext *ctx)
       parser_advance (ctx);
       return parse_quoted_expression (ctx);
     case TOKEN_SYMBOL:
-      return parse_atom (ctx);
     case TOKEN_NUMBER:
-      return parse_atom (ctx);
     case TOKEN_STRING:
       return parse_atom (ctx);
-    case TOKEN_WHITESPACE:
-      parser_advance (ctx);
-      return parse_expr (ctx);
-    case TOKEN_COMMENT:
-      parser_advance (ctx);
-      return parse_expr (ctx);
     case TOKEN_EOF:
       parser_error (ctx, "Unexpexted end of file (unterminated list?)");
       break;
@@ -90,7 +94,7 @@ parse_expr (struct ParserContext *ctx)
   int start_col = ctx->current_token.start_col;
   int end_line = ctx->current_token.end_line;
   int end_col = ctx->current_token.end_col;
-  const char *error_msg = "Illegal token";
+  const char *error_msg = "Unhandled token in parse_expr";
 
   return (struct Expr){ .type = S_TYPE_ERROR,
                         .val.error_msg = error_msg,
@@ -118,8 +122,20 @@ parse_list (struct ParserContext *ctx)
   size_t start_col = ctx->current_token.start_col;
   struct ExprVector list = exprvector_create ();
   parser_advance (ctx);
-  while (ctx->current_token.type != TOKEN_RPAREN)
+  while (1)
     {
+      skip_whitespace_and_comments (ctx);
+
+      if (ctx->current_token.type == TOKEN_RPAREN)
+        {
+          break;
+        }
+
+      if (ctx->current_token.type == TOKEN_EOF)
+        {
+          parser_error (ctx, "Unterminated list, found EOF");
+        }
+
       struct Expr e = parse_expr (ctx);
       exprvector_append (&list, e);
     }
@@ -144,6 +160,7 @@ parse_quoted_expression (struct ParserContext *ctx)
                      .end_col = start_col };
   struct Expr quote = expr_atom_make (&t);
   exprvector_append (&list, quote);
+  skip_whitespace_and_comments (ctx);
 
   struct Expr e = parse_expr (ctx);
   exprvector_append (&list, e);
