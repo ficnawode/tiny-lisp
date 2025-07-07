@@ -36,10 +36,29 @@ static void sanitize_label(char *buffer, size_t buf_size, const char *prefix,
 
   strcpy(buffer, prefix);
 
+  // We need to allow '#' for #t and #f
   for (size_t i = 0; name[i] != '\0'; ++i) {
-    buffer[prefix_len + i] = isalnum((unsigned char)name[i]) ? name[i] : '_';
+    char c = name[i];
+    buffer[prefix_len + i] = (isalnum((unsigned char)c) || c == '#') ? c : '_';
   }
   buffer[prefix_len + strlen(name)] = '\0';
+}
+
+// NEW: Function to generate global LispValue constants for true and nil/false
+static void generate_runtime_globals(struct CompilerContext *ctx) {
+  fprintf(ctx->gds->data_file, "\n; --- Global LispValue Constants ---\n");
+
+  // G_LISP_TRUE: A LispValue struct representing #t
+  fprintf(ctx->gds->data_file, "align 8\n");
+  fprintf(ctx->gds->data_file, "G_LISP_TRUE:\n");
+  fprintf(ctx->gds->data_file, "  dq %d\t; type = LVAL_TRUE\n", LVAL_TRUE);
+  fprintf(ctx->gds->data_file, "  dq 0\t; value (padding)\n");
+
+  // G_LISP_NIL: A LispValue struct representing nil ('()) and #f
+  fprintf(ctx->gds->data_file, "align 8\n");
+  fprintf(ctx->gds->data_file, "G_LISP_NIL:\n");
+  fprintf(ctx->gds->data_file, "  dq %d\t; type = LVAL_NIL\n", LVAL_NIL);
+  fprintf(ctx->gds->data_file, "  dq 0\t; value (padding)\n");
 }
 
 static void populate_global_scope(struct SymbolTable *st) {
@@ -53,15 +72,26 @@ static void populate_global_scope(struct SymbolTable *st) {
   symbol_map_emplace(st->global_scope->symbol_map, "+", add_info);
   struct SymbolInfo *subtr_info = symbol_make_builtin_func("-", NULL, NULL);
   symbol_map_emplace(st->global_scope->symbol_map, "-", subtr_info);
+
+  // NEW: Add #t and #f as global variables pointing to our constant LispValues
+  struct SymbolInfo *true_info =
+      symbol_make_global_var("#t", "G_LISP_TRUE", NULL);
+  symbol_map_emplace(st->global_scope->symbol_map, "#t", true_info);
+
+  struct SymbolInfo *false_info =
+      symbol_make_global_var("#f", "G_LISP_NIL", NULL);
+  symbol_map_emplace(st->global_scope->symbol_map, "#f", false_info);
 }
 
 static void generate_prologue(FILE *text_section) {
+  // Define constants for LispValue types to make assembly readable
   const char *prologue = "global main\n"
                          "extern lisp_add\n"
                          "extern lisp_subtract\n"
                          "extern lisp_multiply\n"
                          "extern lisp_divide\n"
                          "extern lisp_make_number\n\n";
+
   fprintf(text_section, prologue);
 }
 
@@ -86,7 +116,6 @@ static void generate_main(struct CompilerContext *ctx,
 
 void compile_program(struct ExprVector *program, const char *output_filename) {
   struct SymbolTable *sym_table = symbol_table_create();
-  populate_global_scope(sym_table);
 
   struct GlobalDataSections *gds = gds_create(output_filename);
   if (!gds) {
@@ -95,6 +124,10 @@ void compile_program(struct ExprVector *program, const char *output_filename) {
   }
 
   struct CompilerContext ctx = {.sym_table = sym_table, .gds = gds};
+
+  // *after* creating ctx but *before* compiling any code
+  populate_global_scope(sym_table);
+  generate_runtime_globals(&ctx);
 
   if (!ctx.gds->text_file) {
     fprintf(stderr, "Fatal: Could not get .text section file.\n");
@@ -154,8 +187,18 @@ static void compile_atom(struct CompilerContext *ctx, struct Atom *atom) {
               info->location.stack_offset);
       break;
     case SYM_GLOBAL_VAR:
-      fprintf(ctx->gds->text_file, "  mov rax, [%s]\n",
-              info->location.global_asm_label);
+      // MODIFIED: Handle global variables vs constants like #t and #f
+      // For variables, we load the *value* from the memory location.
+      // For constants (#t, #f), we load the *address* of the global object.
+      if (strcmp(info->name, "#t") == 0 || strcmp(info->name, "#f") == 0) {
+        // Load the address of the global constant LispValue object
+        fprintf(ctx->gds->text_file, "  mov rax, %s\n",
+                info->location.global_asm_label);
+      } else {
+        // Load the value stored in the global variable's memory location
+        fprintf(ctx->gds->text_file, "  mov rax, [%s]\n",
+                info->location.global_asm_label);
+      }
       break;
     default:
       fprintf(stderr, "Compilation error: Cannot use '%s' as a value.\n",
@@ -171,16 +214,8 @@ static void compile_atom(struct CompilerContext *ctx, struct Atom *atom) {
   }
 }
 
-/**
- * @brief Scans a function definition expression to count local variable
- * definitions.
- * @param define_expr_vec The vector for the entire `(define (f ...) ...)`
- * expression.
- * @return The number of local `(define var val)` forms in the function body.
- */
 static size_t count_local_defines(struct ExprVector *define_expr_vec) {
   size_t count = 0;
-  // The body starts at index 2 of a (define (f ...) body...) expression
   for (size_t i = 2; i < define_expr_vec->len; ++i) {
     struct Expr *stmt = &define_expr_vec->elements[i];
     if (stmt->type == S_TYPE_LIST && stmt->val.list_val.len >= 2) {
@@ -191,8 +226,6 @@ static size_t count_local_defines(struct ExprVector *define_expr_vec) {
       if (op->type == S_TYPE_ATOM &&
           op->val.atom_val.type == ATOM_TYPE_SYMBOL &&
           strcmp(op->val.atom_val.value.symbol, "define") == 0) {
-        // Ensure it's a variable define `(define x ...)` and not a
-        // nested func define `(define (g) ...)`
         if (name->type == S_TYPE_ATOM) {
           count++;
         }
@@ -272,7 +305,7 @@ static void compile_define_function(struct CompilerContext *ctx,
 
   FILE *temp_text_file = ctx->gds->text_file;
   ctx->gds->text_file = ctx->gds->func_file;
-  ctx->gds->func_file = NULL; // Prevents compiling nested functions for now
+  ctx->gds->func_file = NULL;
   for (size_t i = 2; i < vec->len; ++i) {
     compile_expr(ctx, &vec->elements[i]);
   }
@@ -280,7 +313,7 @@ static void compile_define_function(struct CompilerContext *ctx,
   ctx->gds->text_file = temp_text_file;
 
   fprintf(ctx->gds->func_file, "\n  ; Epilogue for %s\n", func_name);
-  fprintf(ctx->gds->func_file, "  mov rsp, rbp\n"); // Deallocate stack frame
+  fprintf(ctx->gds->func_file, "  mov rsp, rbp\n");
   fprintf(ctx->gds->func_file, "  pop rbp\n");
   fprintf(ctx->gds->func_file, "  ret\n");
   fprintf(ctx->gds->func_file, "; ---- End Function: %s ----\n", func_name);
@@ -358,8 +391,9 @@ static void compile_list(struct CompilerContext *ctx, struct Expr *list_expr) {
   struct ExprVector *vec = &list_expr->val.list_val;
 
   if (vec->len == 0) {
-    fprintf(stderr, "Compiling '() is not implemented yet.\n");
-    exit(EXIT_FAILURE);
+    fprintf(ctx->gds->text_file, "\n  ; Load '() -> nil value\n");
+    fprintf(ctx->gds->text_file, "  mov rax, G_LISP_NIL\n");
+    return;
   }
 
   struct Expr *first = &vec->elements[0];
@@ -390,7 +424,6 @@ static void compile_list(struct CompilerContext *ctx, struct Expr *list_expr) {
         char *symbol_name = name_part->val.atom_val.value.symbol;
 
         if (ctx->sym_table->current_scope == ctx->sym_table->global_scope) {
-          // --- Global Variable Definition ---
           compile_expr(ctx, &vec->elements[2]);
           fprintf(ctx->gds->text_file, "  push rax\n");
 
@@ -409,8 +442,7 @@ static void compile_list(struct CompilerContext *ctx, struct Expr *list_expr) {
           fprintf(ctx->gds->text_file, "  mov [%s], rbx\n",
                   info->location.global_asm_label);
           fprintf(ctx->gds->text_file, "  mov rax, rbx\n");
-        } else // local variable
-        {
+        } else {
           fprintf(ctx->gds->text_file, "\n  ; Local define for '%s'\n",
                   symbol_name);
           compile_expr(ctx, &vec->elements[2]);
@@ -431,16 +463,49 @@ static void compile_list(struct CompilerContext *ctx, struct Expr *list_expr) {
         compile_define_function(ctx, vec);
         fprintf(ctx->gds->text_file,
                 "  ; Set RAX to a placeholder for function definition\n");
-        fprintf(ctx->gds->text_file,
-                "  mov rax, 0 ; Or a pointer to a global LVAL_UNDEFINED\n");
+        fprintf(ctx->gds->text_file, "  mov rax, G_LISP_NIL\n");
       } else {
         fprintf(stderr, "Error: Invalid 'define' syntax. Second "
                         "element must be a symbol or a list.\n");
         exit(EXIT_FAILURE);
       }
     } else if (strcmp(op_name, "if") == 0) {
-      fprintf(stderr, "'if' special form not yet implemented.\n");
-      exit(EXIT_FAILURE);
+      if (vec->len < 3 || vec->len > 4) {
+        fprintf(stderr,
+                "Error: 'if' special form requires 2 or 3 arguments, but got "
+                "%zu.\n",
+                vec->len - 1);
+        exit(EXIT_FAILURE);
+      }
+
+      int else_label_id = new_label_id();
+      int end_if_label_id = new_label_id();
+
+      fprintf(ctx->gds->text_file, "\n  ; --- IF Statement ---\n");
+      fprintf(ctx->gds->text_file, "  ; Compile condition\n");
+      compile_expr(ctx, &vec->elements[1]);
+
+      fprintf(ctx->gds->text_file, "  ; Check if condition is false (#f)\n");
+      fprintf(ctx->gds->text_file, "  cmp rax, G_LISP_NIL\n");
+      fprintf(ctx->gds->text_file, "  je L_if_else_%d\n", else_label_id);
+
+      // --- Then branch ---
+      fprintf(ctx->gds->text_file, "\n  ; Then branch\n");
+      compile_expr(ctx, &vec->elements[2]);
+      fprintf(ctx->gds->text_file, "  jmp L_if_end_%d\n", end_if_label_id);
+
+      // --- Else branch ---
+      fprintf(ctx->gds->text_file, "\nL_if_else_%d:\n", else_label_id);
+      if (vec->len == 4) {
+        fprintf(ctx->gds->text_file, "  ; Else branch\n");
+        compile_expr(ctx, &vec->elements[3]);
+      } else {
+        fprintf(ctx->gds->text_file, "  ; No else branch, result is #f\n");
+        fprintf(ctx->gds->text_file, "  mov rax, G_LISP_NIL\n");
+      }
+
+      fprintf(ctx->gds->text_file, "\nL_if_end_%d:\n", end_if_label_id);
+      fprintf(ctx->gds->text_file, "  ; --- End IF Statement ---\n");
     }
   } else if (op_info->kind == SYM_BUILTIN_FUNC ||
              op_info->kind == SYM_USER_FUNC) {

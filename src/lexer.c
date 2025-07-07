@@ -153,7 +153,7 @@ static struct Token lexer_handle_str(struct LexerContext *ctx) {
 }
 
 static int is_symbol_char(char c) {
-  return isalnum(c) || strchr("!$%&*+-./:<=>?@^_~", c) != NULL;
+  return isalnum(c) || strchr("#!$%&*+-./:<=>?@^_~", c) != NULL;
 }
 
 static struct Token lexer_handle_symbol(struct LexerContext *ctx) {
