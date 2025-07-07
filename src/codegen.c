@@ -36,7 +36,6 @@ static void sanitize_label(char *buffer, size_t buf_size, const char *prefix,
 
   strcpy(buffer, prefix);
 
-  // We need to allow '#' for #t and #f
   for (size_t i = 0; name[i] != '\0'; ++i) {
     char c = name[i];
     buffer[prefix_len + i] = (isalnum((unsigned char)c) || c == '#') ? c : '_';
@@ -44,17 +43,14 @@ static void sanitize_label(char *buffer, size_t buf_size, const char *prefix,
   buffer[prefix_len + strlen(name)] = '\0';
 }
 
-// NEW: Function to generate global LispValue constants for true and nil/false
 static void generate_runtime_globals(struct CompilerContext *ctx) {
   fprintf(ctx->gds->data_file, "\n; --- Global LispValue Constants ---\n");
 
-  // G_LISP_TRUE: A LispValue struct representing #t
   fprintf(ctx->gds->data_file, "align 8\n");
   fprintf(ctx->gds->data_file, "G_LISP_TRUE:\n");
   fprintf(ctx->gds->data_file, "  dq %d\t; type = LVAL_TRUE\n", LVAL_TRUE);
   fprintf(ctx->gds->data_file, "  dq 0\t; value (padding)\n");
 
-  // G_LISP_NIL: A LispValue struct representing nil ('()) and #f
   fprintf(ctx->gds->data_file, "align 8\n");
   fprintf(ctx->gds->data_file, "G_LISP_NIL:\n");
   fprintf(ctx->gds->data_file, "  dq %d\t; type = LVAL_NIL\n", LVAL_NIL);
@@ -187,7 +183,7 @@ static void compile_atom(struct CompilerContext *ctx, struct Atom *atom) {
               info->location.stack_offset);
       break;
     case SYM_GLOBAL_VAR:
-      // MODIFIED: Handle global variables vs constants like #t and #f
+      // Handle global variables vs constants like #t and #f
       // For variables, we load the *value* from the memory location.
       // For constants (#t, #f), we load the *address* of the global object.
       if (strcmp(info->name, "#t") == 0 || strcmp(info->name, "#f") == 0) {
