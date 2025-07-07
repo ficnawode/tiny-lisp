@@ -30,7 +30,7 @@ mutate_func_name (const char *cFunctionName)
       return NULL;
     }
 
-  int i, j = 0;
+  size_t i, j = 0;
   for (i = 0; i < len; i++)
     {
       if (is_valid_assembly_char (cFunctionName[i]))

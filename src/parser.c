@@ -86,6 +86,18 @@ parse_expr (struct ParserContext *ctx)
       parser_error (ctx, "Illegal token");
       break;
     }
+  int start_line = ctx->current_token.start_line;
+  int start_col = ctx->current_token.start_col;
+  int end_line = ctx->current_token.end_line;
+  int end_col = ctx->current_token.end_col;
+  const char *error_msg = "Illegal token";
+
+  return (struct Expr){ .type = S_TYPE_ERROR,
+                        .val.error_msg = error_msg,
+                        .start_line = start_line,
+                        .start_col = start_col,
+                        .end_line = end_line,
+                        .end_col = end_col };
 }
 
 struct Expr

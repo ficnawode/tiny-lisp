@@ -1,5 +1,6 @@
 #include "global_data_sections.h"
 #include <errno.h> // For perror and errno
+#include <stdbool.h>
 #include <stdio.h> // For ftell, ferror, etc.
 #include <stdlib.h>
 #include <string.h>
@@ -37,7 +38,8 @@ copy_file_content (FILE *dest, FILE *src)
 
 static void
 append_and_cleanup_section (FILE *final_asm_file, const char *base_filename,
-                            const char *section_name, FILE *section_file)
+                            const char *section_name, FILE *section_file,
+                            bool write_section_header)
 {
   if (!section_file)
     {
@@ -49,7 +51,10 @@ append_and_cleanup_section (FILE *final_asm_file, const char *base_filename,
 
   if (file_size > 0)
     {
-      fprintf (final_asm_file, "\nsection .%s\n", section_name);
+      if (write_section_header)
+        {
+          fprintf (final_asm_file, "\nsection .%s\n", section_name);
+        }
       if (copy_file_content (final_asm_file, section_file) != 0)
         {
           fprintf (stderr, "Warning: Failed to copy content for section .%s\n",
@@ -77,9 +82,9 @@ gds_destroy (struct GlobalDataSections *gds)
       return;
     }
 
-  const char *sections[] = { "text", "data", "rodata", "bss" };
-  FILE *files[]
-      = { gds->text_file, gds->data_file, gds->rodata_file, gds->bss_file };
+  const char *sections[] = { "func", "text", "data", "rodata", "bss" };
+  FILE *files[] = { gds->func_file, gds->text_file, gds->data_file,
+                    gds->rodata_file, gds->bss_file };
   char temp_name[256];
 
   for (size_t i = 0; i < sizeof (sections) / sizeof (sections[0]); ++i)
@@ -109,9 +114,9 @@ gds_create (const char *base_filename)
   strncpy (gds->base_filename, base_filename, sizeof (gds->base_filename) - 1);
   gds->base_filename[sizeof (gds->base_filename) - 1] = '\0';
 
-  const char *sections[] = { "text", "data", "rodata", "bss" };
-  FILE **file_ptrs[] = { &gds->text_file, &gds->data_file, &gds->rodata_file,
-                         &gds->bss_file };
+  const char *sections[] = { "func", "text", "data", "rodata", "bss" };
+  FILE **file_ptrs[] = { &gds->func_file, &gds->text_file, &gds->data_file,
+                         &gds->rodata_file, &gds->bss_file };
   char temp_name_buf[256];
 
   for (size_t i = 0; i < sizeof (sections) / sizeof (sections[0]); ++i)
@@ -141,7 +146,7 @@ gds_close_and_finalize (struct GlobalDataSections *gds_ctx)
       return;
     }
 
-  char final_filename[256];
+  char final_filename[256 + 3];
   snprintf (final_filename, sizeof (final_filename), "%s.s",
             gds_ctx->base_filename);
 
@@ -152,15 +157,17 @@ gds_close_and_finalize (struct GlobalDataSections *gds_ctx)
       gds_destroy (gds_ctx);
       return;
     }
-
   append_and_cleanup_section (final_asm_file, gds_ctx->base_filename, "text",
-                              gds_ctx->text_file);
+                              gds_ctx->func_file, true);
+
+  append_and_cleanup_section (final_asm_file, gds_ctx->base_filename, "",
+                              gds_ctx->text_file, false);
   append_and_cleanup_section (final_asm_file, gds_ctx->base_filename, "rodata",
-                              gds_ctx->rodata_file);
+                              gds_ctx->rodata_file, true);
   append_and_cleanup_section (final_asm_file, gds_ctx->base_filename, "data",
-                              gds_ctx->data_file);
+                              gds_ctx->data_file, true);
   append_and_cleanup_section (final_asm_file, gds_ctx->base_filename, "bss",
-                              gds_ctx->bss_file);
+                              gds_ctx->bss_file, true);
 
   fclose (final_asm_file);
   free (gds_ctx);

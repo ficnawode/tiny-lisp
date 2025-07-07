@@ -4,3 +4,6 @@ obj/
 bin/
 
 .vscode/
+
+lisp_out.s
+my_lisp_program

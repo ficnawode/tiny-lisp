@@ -5,30 +5,20 @@
 #include "scope.h"
 #include "symbol.h"
 
-#include <ctype.h> // For isalnum
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// --- Forward Declarations & Compiler Context ---
-
-// Using `struct` keyword directly, no typedef.
-struct CompilerContext
-{
-  struct SymbolTable *sym_table;
-  struct GlobalDataSections *gds;
-  FILE *text_section; // Convenience pointer to the main code section
-};
-
 static void compile_expr (struct CompilerContext *ctx, struct Expr *expr);
 static void compile_atom (struct CompilerContext *ctx, struct Atom *atom);
 static void compile_list (struct CompilerContext *ctx, struct Expr *list_expr);
+static void compile_define_function (struct CompilerContext *ctx,
+                                     struct ExprVector *vec);
+static void compile_function_call (struct CompilerContext *ctx,
+                                   struct SymbolInfo *op_info,
+                                   struct ExprVector *vec);
 
-// --- Helper Functions ---
-
-/**
- * @brief Creates a new, unique label ID for things like if/else blocks.
- */
 static int
 new_label_id ()
 {
@@ -36,20 +26,12 @@ new_label_id ()
   return label_counter++;
 }
 
-/**
- * @brief Sanitizes a symbol name to be a valid assembly label.
- *        Replaces any non-alphanumeric characters with underscores.
- * @param buffer The output buffer for the sanitized label.
- * @param buf_size The size of the output buffer.
- * @param prefix A prefix for the label (e.g., "G_" for globals).
- * @param name The original symbol name.
- */
 static void
 sanitize_label (char *buffer, size_t buf_size, const char *prefix,
                 const char *name)
 {
   size_t prefix_len = strlen (prefix);
-  // Ensure buffer has space for prefix, name, and null terminator
+
   if (buf_size < prefix_len + strlen (name) + 1)
     {
       fprintf (stderr, "Error: Buffer too small for sanitized label.\n");
@@ -66,9 +48,6 @@ sanitize_label (char *buffer, size_t buf_size, const char *prefix,
   buffer[prefix_len + strlen (name)] = '\0';
 }
 
-/**
- * @brief Populates the global scope with built-in functions and special forms.
- */
 static void
 populate_global_scope (struct SymbolTable *st)
 {
@@ -80,9 +59,42 @@ populate_global_scope (struct SymbolTable *st)
 
   struct SymbolInfo *add_info = symbol_make_builtin_func ("+", NULL, NULL);
   symbol_map_emplace (st->global_scope->symbol_map, "+", add_info);
+  struct SymbolInfo *subtr_info = symbol_make_builtin_func ("-", NULL, NULL);
+  symbol_map_emplace (st->global_scope->symbol_map, "-", subtr_info);
 }
 
-// --- Main Compilation Driver ---
+static void
+generate_prologue (FILE *text_section)
+{
+  const char *prologue = "global main\n"
+                         "extern lisp_add\n"
+                         "extern lisp_subtract\n"
+                         "extern lisp_multiply\n"
+                         "extern lisp_divide\n"
+                         "extern lisp_make_number\n\n";
+  fprintf (text_section, prologue);
+}
+
+static void
+generate_main (struct CompilerContext *ctx, struct ExprVector *program)
+{
+  const char *prologue = "main:\n"
+                         "  push rbp\n"
+                         "  mov rbp, rsp\n\n";
+  fprintf (ctx->gds->text_file, prologue);
+
+  for (size_t i = 0; i < program->len; ++i)
+    {
+      compile_expr (ctx, &program->elements[i]);
+    }
+
+  const char *epilogue = "\n  ; Main function epilogue\n"
+                         "  mov rax, 0      ; Return 0 for success\n"
+                         "  mov rsp, rbp\n"
+                         "  pop rbp\n"
+                         "  ret\n";
+  fprintf (ctx->gds->text_file, epilogue);
+}
 
 void
 compile_program (struct ExprVector *program, const char *output_filename)
@@ -97,10 +109,9 @@ compile_program (struct ExprVector *program, const char *output_filename)
       exit (EXIT_FAILURE);
     }
 
-  struct CompilerContext ctx
-      = { .sym_table = sym_table, .gds = gds, .text_section = gds->text_file };
+  struct CompilerContext ctx = { .sym_table = sym_table, .gds = gds };
 
-  if (!ctx.text_section)
+  if (!ctx.gds->text_file)
     {
       fprintf (stderr, "Fatal: Could not get .text section file.\n");
       gds_close_and_finalize (gds);
@@ -108,34 +119,11 @@ compile_program (struct ExprVector *program, const char *output_filename)
       exit (EXIT_FAILURE);
     }
 
-  // --- Generate File Header ---
-  fprintf (ctx.text_section, "global main\n");
-  fprintf (ctx.text_section, "extern lisp_add\n");
-  fprintf (ctx.text_section, "extern lisp_make_number\n\n");
-
-  // --- Generate Main Function ---
-  fprintf (ctx.text_section, "main:\n");
-  fprintf (ctx.text_section, "  push rbp\n");
-  fprintf (ctx.text_section, "  mov rbp, rsp\n\n");
-
-  // Compile all top-level expressions
-  for (size_t i = 0; i < program->len; ++i)
-    {
-      compile_expr (&ctx, &program->elements[i]);
-    }
-
-  // --- Generate Main Function Epilogue ---
-  fprintf (ctx.text_section, "\n  ; Main function epilogue\n");
-  fprintf (ctx.text_section, "  mov rax, 0      ; Return 0 for success\n");
-  fprintf (ctx.text_section, "  mov rsp, rbp\n");
-  fprintf (ctx.text_section, "  pop rbp\n");
-  fprintf (ctx.text_section, "  ret\n");
-
+  generate_prologue (ctx.gds->text_file);
+  generate_main (&ctx, program);
   gds_close_and_finalize (gds);
   symbol_table_destroy (sym_table);
 }
-
-// --- Expression-level Compilation ---
 
 static void
 compile_expr (struct CompilerContext *ctx, struct Expr *expr)
@@ -166,12 +154,12 @@ compile_atom (struct CompilerContext *ctx, struct Atom *atom)
         fprintf (rodata, "L_double_%d: dq %lf\n", label_id,
                  atom->value.number);
 
-        fprintf (ctx->text_section,
+        fprintf (ctx->gds->text_file,
                  "\n  ; Create LispValue for number %.2f on the heap\n",
                  atom->value.number);
-        fprintf (ctx->text_section, "  movsd xmm0, [rel L_double_%d]\n",
+        fprintf (ctx->gds->text_file, "  movsd xmm0, [rel L_double_%d]\n",
                  label_id);
-        fprintf (ctx->text_section, "  call lisp_make_number\n");
+        fprintf (ctx->gds->text_file, "  call lisp_make_number\n");
         break;
       }
     case ATOM_TYPE_SYMBOL:
@@ -185,16 +173,16 @@ compile_atom (struct CompilerContext *ctx, struct Atom *atom)
             exit (EXIT_FAILURE);
           }
 
-        fprintf (ctx->text_section, "\n  ; Load symbol '%s'\n",
+        fprintf (ctx->gds->text_file, "\n  ; Load symbol '%s'\n",
                  atom->value.symbol);
         switch (info->kind)
           {
           case SYM_LOCAL_VAR:
-            fprintf (ctx->text_section, "  mov rax, [rbp - %d]\n",
+            fprintf (ctx->gds->text_file, "  mov rax, [rbp - %d]\n",
                      info->location.stack_offset);
             break;
           case SYM_GLOBAL_VAR:
-            fprintf (ctx->text_section, "  mov rax, [%s]\n",
+            fprintf (ctx->gds->text_file, "  mov rax, [%s]\n",
                      info->location.global_asm_label);
             break;
           default:
@@ -210,6 +198,175 @@ compile_atom (struct CompilerContext *ctx, struct Atom *atom)
       exit (EXIT_FAILURE);
       break;
     }
+}
+
+static void
+compile_define_function (struct CompilerContext *ctx, struct ExprVector *vec)
+{
+  struct Expr *signature = &vec->elements[1];
+  struct ExprVector *sig_vec = &signature->val.list_val;
+  struct Expr *func_name_expr = &sig_vec->elements[0];
+
+  if (func_name_expr->type != S_TYPE_ATOM)
+    {
+      fprintf (stderr, "Error: Function name must be a symbol.\n");
+      exit (EXIT_FAILURE);
+    }
+  const char *func_name = func_name_expr->val.atom_val.value.symbol;
+
+  char label_buf[256];
+  sanitize_label (label_buf, sizeof (label_buf), "user_func_", func_name);
+  char *asm_label = strdup (label_buf);
+
+  struct SymbolInfo *func_info
+      = symbol_make_user_func (func_name, asm_label, func_name_expr);
+  symbol_table_define (ctx->sym_table, func_info);
+
+  if (ctx->gds->func_file == NULL)
+    {
+      printf ("\nFunction file is NULL: are you trying to create a nested "
+              "function? \n");
+      exit (1);
+    }
+
+  fprintf (ctx->gds->func_file, "\n; ---- Function Definition: %s ----\n",
+           func_name);
+  fprintf (ctx->gds->func_file, "%s:\n", asm_label);
+  free (asm_label);
+
+  fprintf (ctx->gds->func_file, "  push rbp\n");
+  fprintf (ctx->gds->func_file, "  mov rbp, rsp\n");
+
+  symbol_table_enter_scope (ctx->sym_table);
+
+  const char *arg_registers[] = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
+  size_t num_params = sig_vec->len - 1;
+  if (num_params > 6)
+    {
+      fprintf (stderr, "Error: Functions with more than 6 parameters are not "
+                       "yet supported.\n");
+      exit (EXIT_FAILURE);
+    }
+
+  int current_stack_offset = 0;
+  for (size_t i = 0; i < num_params; ++i)
+    {
+      struct Expr *param_expr = &sig_vec->elements[i + 1];
+      const char *param_name = param_expr->val.atom_val.value.symbol;
+
+      struct SymbolInfo *param_info
+          = symbol_make_local_var (param_name, 0, param_expr);
+      current_stack_offset = symbol_table_define (ctx->sym_table, param_info);
+
+      fprintf (ctx->gds->func_file,
+               "  ; Store parameter '%s' from %s to [rbp - %d]\n", param_name,
+               arg_registers[i], current_stack_offset);
+      fprintf (ctx->gds->func_file, "  mov [rbp - %d], %s\n",
+               current_stack_offset, arg_registers[i]);
+    }
+
+  if (current_stack_offset > 0)
+    {
+      fprintf (ctx->gds->func_file, "  sub rsp, %d\n", current_stack_offset);
+    }
+
+  fprintf (ctx->gds->func_file, "\n  ; Function Body for %s\n", func_name);
+
+  FILE *temp_text_file = ctx->gds->text_file;
+  ctx->gds->text_file = ctx->gds->func_file;
+  ctx->gds->func_file = NULL;
+  for (size_t i = 2; i < vec->len; ++i)
+    {
+      compile_expr (ctx, &vec->elements[i]);
+    }
+  ctx->gds->func_file = ctx->gds->text_file;
+  ctx->gds->text_file = temp_text_file;
+
+  fprintf (ctx->gds->func_file, "\n  ; Epilogue for %s\n", func_name);
+  fprintf (ctx->gds->func_file, "  mov rsp, rbp\n");
+  fprintf (ctx->gds->func_file, "  pop rbp\n");
+  fprintf (ctx->gds->func_file, "  ret\n");
+  fprintf (ctx->gds->func_file, "; ---- End Function: %s ----\n", func_name);
+
+  symbol_table_exit_scope (ctx->sym_table);
+}
+
+const char *
+match_builtin_function (const char *op_name)
+{
+  const char *extern_func = "UNKNOWN_FUNCTION";
+  if (strcmp (op_name, "+") == 0)
+    extern_func = "lisp_add";
+  else if (strcmp (op_name, "-"))
+    extern_func = "lisp_subtract";
+  else if (strcmp (op_name, "*"))
+    extern_func = "lisp_multiply";
+  else if (strcmp (op_name, "/"))
+    extern_func = "lisp_divide";
+  return extern_func;
+}
+
+static void
+compile_function_call (struct CompilerContext *ctx, struct SymbolInfo *op_info,
+                       struct ExprVector *vec)
+{
+  const char *op_name = op_info->name;
+  size_t num_args = vec->len - 1;
+
+  fprintf (ctx->gds->text_file, "\n  ; --- Function Call to '%s' ---\n",
+           op_name);
+
+  if (op_info->kind == SYM_BUILTIN_FUNC)
+    {
+      if (strcmp (op_name, "+") == 0 || strcmp (op_name, "-") == 0)
+        {
+          if (num_args != 2)
+            {
+              fprintf (stderr,
+                       "Error: Built-in '%s' requires 2 arguments, got %zu.\n",
+                       op_name, num_args);
+              exit (EXIT_FAILURE);
+            }
+          compile_expr (ctx, &vec->elements[2]);
+          fprintf (ctx->gds->text_file, "  push rax\n");
+          compile_expr (ctx, &vec->elements[1]);
+          fprintf (ctx->gds->text_file, "  mov rdi, rax\n");
+          fprintf (ctx->gds->text_file, "  pop rsi\n");
+
+          const char *extern_func = match_builtin_function (op_name);
+          fprintf (ctx->gds->text_file, "  call %s\n", extern_func);
+          return;
+        }
+    }
+
+  // --- General case for User-Defined Functions ---
+  const char *arg_registers[] = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
+  if (num_args > 6)
+    {
+      fprintf (stderr, "Error: Calling functions with more than 6 arguments "
+                       "is not supported.\n");
+      exit (EXIT_FAILURE);
+    }
+
+  // push args to stack
+  fprintf (ctx->gds->text_file, "  ; Evaluate arguments\n");
+  for (size_t i = 1; i <= num_args; ++i)
+    {
+      compile_expr (ctx, &vec->elements[i]);
+      fprintf (ctx->gds->text_file, "  push rax\n");
+    }
+
+  // pop args from stack
+  fprintf (ctx->gds->text_file, "  ; Load arguments into registers\n");
+  for (int i = num_args - 1; i >= 0; --i)
+    {
+      fprintf (ctx->gds->text_file, "  pop %s\n", arg_registers[i]);
+    }
+
+  fprintf (ctx->gds->text_file, "  call %s\n",
+           op_info->location.global_asm_label);
+  fprintf (ctx->gds->text_file,
+           "  ; --- End Call to '%s', result is in RAX ---\n", op_name);
 }
 
 static void
@@ -231,102 +388,90 @@ compile_list (struct CompilerContext *ctx, struct Expr *list_expr)
       exit (EXIT_FAILURE);
     }
 
-  struct SymbolInfo *op_info
-      = symbol_table_lookup (ctx->sym_table, first->val.atom_val.value.symbol);
+  const char *op_name = first->val.atom_val.value.symbol;
+  struct SymbolInfo *op_info = symbol_table_lookup (ctx->sym_table, op_name);
+
   if (!op_info)
     {
-      fprintf (stderr, "Error: Undefined operator '%s'\n",
-               first->val.atom_val.value.symbol);
+      fprintf (stderr, "Error: Undefined operator '%s'\n", op_name);
       exit (EXIT_FAILURE);
     }
 
   if (op_info->kind == SYM_SPECIAL_FORM)
     {
-      if (strcmp (op_info->name, "define") == 0)
+      if (strcmp (op_name, "define") == 0)
         {
-          if (vec->len != 3 || vec->elements[1].type != S_TYPE_ATOM)
+          if (vec->len < 3)
             {
-              fprintf (stderr, "Error: Invalid 'define' syntax.\n");
+              fprintf (stderr,
+                       "Error: Invalid 'define' syntax. Too few parts.\n");
               exit (EXIT_FAILURE);
             }
-          char *symbol_name = vec->elements[1].val.atom_val.value.symbol;
 
-          compile_expr (ctx, &vec->elements[2]);
+          struct Expr *name_part = &vec->elements[1];
 
-          fprintf (ctx->text_section, "  push rax\n");
-
-          if (ctx->sym_table->current_scope == ctx->sym_table->global_scope)
+          if (name_part->type == S_TYPE_ATOM)
             {
-              FILE *data = ctx->gds->data_file;
+              char *symbol_name = name_part->val.atom_val.value.symbol;
+              compile_expr (ctx, &vec->elements[2]);
+              fprintf (ctx->gds->text_file, "  push rax\n");
 
-              char label_buf[256];
-              sanitize_label (label_buf, sizeof (label_buf), "G_",
-                              symbol_name);
-
-              char *label_name = strdup (label_buf);
-              if (!label_name)
+              if (ctx->sym_table->current_scope
+                  == ctx->sym_table->global_scope)
                 {
-                  perror ("strdup failed");
+                  FILE *data = ctx->gds->data_file;
+                  char label_buf[256];
+                  sanitize_label (label_buf, sizeof (label_buf), "G_",
+                                  symbol_name);
+                  char *label_name = strdup (label_buf);
+                  fprintf (data, "%s: dq 0\n", label_name);
+
+                  struct SymbolInfo *info = symbol_make_global_var (
+                      symbol_name, label_name, name_part);
+                  symbol_table_define (ctx->sym_table, info);
+                  free (label_name);
+
+                  fprintf (ctx->gds->text_file, "  pop rbx\n");
+                  fprintf (ctx->gds->text_file, "  mov [%s], rbx\n",
+                           info->location.global_asm_label);
+                  fprintf (ctx->gds->text_file, "  mov rax, rbx\n");
+                }
+              else
+                {
+                  fprintf (stderr, "Local 'define' is not yet supported.\n");
                   exit (EXIT_FAILURE);
                 }
-              fprintf (data, "%s: dq 0\n", label_name);
-
-              struct SymbolInfo *info = symbol_make_global_var (
-                  symbol_name, symbol_name, &vec->elements[1]);
-              info->location.global_asm_label = label_name;
-              symbol_table_define (ctx->sym_table, info);
-
-              fprintf (ctx->text_section, "  pop rbx\n");
-              fprintf (ctx->text_section, "  mov [%s], rbx\n", label_name);
-              fprintf (ctx->text_section, "  mov rax, rbx\n");
+            }
+          else if (name_part->type == S_TYPE_LIST)
+            {
+              compile_define_function (ctx, vec);
+              fprintf (
+                  ctx->gds->text_file,
+                  "  ; Set RAX to a placeholder for function definition\n");
+              fprintf (
+                  ctx->gds->text_file,
+                  "  mov rax, 0 ; Or a pointer to a global LVAL_UNDEFINED\n");
             }
           else
             {
-              fprintf (stderr, "Local 'define' is not yet supported.\n");
+              fprintf (stderr, "Error: Invalid 'define' syntax. Second "
+                               "element must be a symbol or a list.\n");
               exit (EXIT_FAILURE);
             }
         }
-      else if (strcmp (op_info->name, "if") == 0)
+      else if (strcmp (op_name, "if") == 0)
         {
-          fprintf (
-              stderr,
-              "'if' special form not fully implemented in this refactor.\n");
+          fprintf (stderr, "'if' special form not yet implemented.\n");
           exit (EXIT_FAILURE);
         }
     }
   else if (op_info->kind == SYM_BUILTIN_FUNC || op_info->kind == SYM_USER_FUNC)
     {
-      if (strcmp (op_info->name, "+") == 0)
-        {
-          if (vec->len - 1 != 2)
-            {
-              fprintf (stderr, "Error: Built-in '+' requires 2 arguments.\n");
-              exit (EXIT_FAILURE);
-            }
-
-          fprintf (ctx->text_section, "\n  ; ABI-compliant call to '%s'\n",
-                   op_info->name);
-          compile_expr (ctx, &vec->elements[2]);
-          fprintf (ctx->text_section, "  push rax\n");
-
-          compile_expr (ctx, &vec->elements[1]);
-
-          fprintf (ctx->text_section, "  mov rdi, rax\n");
-          fprintf (ctx->text_section, "  pop rsi\n");
-
-          fprintf (ctx->text_section, "  call lisp_add\n");
-        }
-      else
-        {
-          fprintf (stderr, "Function call to '%s' is not implemented.\n",
-                   op_info->name);
-          exit (EXIT_FAILURE);
-        }
+      compile_function_call (ctx, op_info, vec);
     }
   else
     {
-      fprintf (stderr, "Error: Cannot call non-function '%s'.\n",
-               op_info->name);
+      fprintf (stderr, "Error: Cannot call non-function '%s'.\n", op_name);
       exit (EXIT_FAILURE);
     }
 }

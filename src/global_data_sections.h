@@ -5,6 +5,7 @@
 
 struct GlobalDataSections
 {
+  FILE *func_file;
   FILE *text_file;
   FILE *data_file;
   FILE *rodata_file;
