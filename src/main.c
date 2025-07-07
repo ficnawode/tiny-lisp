@@ -1,4 +1,4 @@
-#include "compiler.h"
+#include "codegen.h"
 #include "parser.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -76,7 +76,6 @@ main (int argc, char **argv)
   struct ParserContext parser = parser_make (source_code);
   struct ExprVector ast = parse_program (&parser);
 
-  printf ("--- AST for %s ---\n", input_filename);
   pretty_print_ast (&ast);
 
   compile_program (&ast, output_basename);
