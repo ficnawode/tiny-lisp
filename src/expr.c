@@ -2,72 +2,57 @@
 #include <stdio.h>
 #include <string.h>
 
-char *
-unquote_str (const char *lexeme)
-{
-  if (lexeme == NULL || strlen (lexeme) < 2 || lexeme[0] != '"'
-      || lexeme[strlen (lexeme) - 1] != '"')
-    {
-      return strdup ("");
-    }
-  char *unquoted = strdup (lexeme + 1);
-  if (!unquoted)
-    {
-      printf ("Failed to allocate unquoted string");
-      exit (EXIT_FAILURE);
-    }
-  unquoted[strlen (unquoted) - 1] = '\0';
+char *unquote_str(const char *lexeme) {
+  if (lexeme == NULL || strlen(lexeme) < 2 || lexeme[0] != '"' ||
+      lexeme[strlen(lexeme) - 1] != '"') {
+    return strdup("");
+  }
+  char *unquoted = strdup(lexeme + 1);
+  if (!unquoted) {
+    printf("Failed to allocate unquoted string");
+    exit(EXIT_FAILURE);
+  }
+  unquoted[strlen(unquoted) - 1] = '\0';
   return unquoted;
 }
 
-struct Atom
-atom_symbol_make (char *s)
-{
+struct Atom atom_symbol_make(char *s) {
   struct Atom a;
   a.type = ATOM_TYPE_SYMBOL;
-  a.value.symbol = strdup (s);
+  a.value.symbol = strdup(s);
   return a;
 }
 
-struct Atom
-atom_number_make (double d)
-{
+struct Atom atom_number_make(double d) {
   struct Atom a;
   a.type = ATOM_TYPE_NUMBER;
   a.value.number = d;
   return a;
 }
 
-struct Atom
-atom_string_make (char *s)
-{
+struct Atom atom_string_make(char *s) {
   struct Atom a;
   a.type = ATOM_TYPE_STRING;
-  a.value.string = unquote_str (s);
+  a.value.string = unquote_str(s);
   return a;
 }
 
-void
-atom_cleanup (struct Atom *a)
-{
-  switch (a->type)
-    {
-    case ATOM_TYPE_NUMBER:
-      return;
-    case ATOM_TYPE_STRING:
-      free (a->value.string);
-      return;
-    case ATOM_TYPE_SYMBOL:
-      free (a->value.symbol);
-      return;
-    default:
-      return;
-    }
+void atom_cleanup(struct Atom *a) {
+  switch (a->type) {
+  case ATOM_TYPE_NUMBER:
+    return;
+  case ATOM_TYPE_STRING:
+    free(a->value.string);
+    return;
+  case ATOM_TYPE_SYMBOL:
+    free(a->value.symbol);
+    return;
+  default:
+    return;
+  }
 }
 
-struct Expr
-expr_atom_make (struct Token *token)
-{
+struct Expr expr_atom_make(struct Token *token) {
 
   struct Expr e;
   e.start_line = token->start_line;
@@ -75,32 +60,29 @@ expr_atom_make (struct Token *token)
   e.start_col = token->start_col;
   e.end_col = token->end_col;
 
-  switch (token->type)
-    {
-    case TOKEN_NUMBER:
-      e.type = S_TYPE_ATOM;
-      double d = strtod (token->lexeme, NULL);
-      e.val.atom_val = atom_number_make (d);
-      return e;
-    case TOKEN_STRING:
-      e.type = S_TYPE_ATOM;
-      e.val.atom_val = atom_string_make (token->lexeme);
-      return e;
-    case TOKEN_SYMBOL:
-      e.type = S_TYPE_ATOM;
-      e.val.atom_val = atom_symbol_make (token->lexeme);
-      return e;
-    default:
-      e.type = S_TYPE_ERROR;
-      e.val.error_msg = "Illegal token to atom conversion";
-      return e;
-    }
+  switch (token->type) {
+  case TOKEN_NUMBER:
+    e.type = S_TYPE_ATOM;
+    double d = strtod(token->lexeme, NULL);
+    e.val.atom_val = atom_number_make(d);
+    return e;
+  case TOKEN_STRING:
+    e.type = S_TYPE_ATOM;
+    e.val.atom_val = atom_string_make(token->lexeme);
+    return e;
+  case TOKEN_SYMBOL:
+    e.type = S_TYPE_ATOM;
+    e.val.atom_val = atom_symbol_make(token->lexeme);
+    return e;
+  default:
+    e.type = S_TYPE_ERROR;
+    e.val.error_msg = "Illegal token to atom conversion";
+    return e;
+  }
 }
 
-struct Expr
-expr_list_make (struct ExprVector content, size_t start_line, size_t start_col,
-                size_t end_line, size_t end_col)
-{
+struct Expr expr_list_make(struct ExprVector content, size_t start_line,
+                           size_t start_col, size_t end_line, size_t end_col) {
 
   struct Expr e;
   e.start_line = start_line;
@@ -112,160 +94,129 @@ expr_list_make (struct ExprVector content, size_t start_line, size_t start_col,
   return e;
 }
 
-void
-expr_cleanup (struct Expr *e)
-{
-  switch (e->type)
-    {
-    case S_TYPE_ATOM:
-      atom_cleanup (&e->val.atom_val);
-      return;
-    case S_TYPE_LIST:
-      exprvector_cleanup (&e->val.list_val);
-      return;
-    default:
-      break;
-    }
+void expr_cleanup(struct Expr *e) {
+  switch (e->type) {
+  case S_TYPE_ATOM:
+    atom_cleanup(&e->val.atom_val);
+    return;
+  case S_TYPE_LIST:
+    exprvector_cleanup(&e->val.list_val);
+    return;
+  default:
+    break;
+  }
 }
 
-struct ExprVector
-exprvector_create (void)
-{
+struct ExprVector exprvector_create(void) {
   const size_t LIST_INITIAL_CAPACITY = 8;
   struct ExprVector e;
   e.capacity = LIST_INITIAL_CAPACITY;
   e.len = 0;
-  e.elements = (struct Expr *)malloc (e.capacity * sizeof (struct Expr));
-  if (e.elements == NULL)
-    {
-      printf ("Failed to allocate expression list\n");
-      exit (EXIT_FAILURE);
-    }
+  e.elements = (struct Expr *)malloc(e.capacity * sizeof(struct Expr));
+  if (e.elements == NULL) {
+    printf("Failed to allocate expression list\n");
+    exit(EXIT_FAILURE);
+  }
   return e;
 }
 
-void
-exprvector_append (struct ExprVector *list, struct Expr expr)
-{
-  if (list->len + 1 >= list->capacity)
-    {
-      int new_capacity = list->capacity * 2;
-      struct Expr *new_elements
-          = (struct Expr *)realloc (list->elements, new_capacity);
-      if (new_elements == NULL)
-        {
-          printf ("Failed to reallocate expression list\n");
-          exit (EXIT_FAILURE);
-        }
-      list->elements = new_elements;
-      list->capacity = new_capacity;
+void exprvector_append(struct ExprVector *list, struct Expr expr) {
+  if (list->len + 1 >= list->capacity) {
+    int new_capacity = list->capacity * 2;
+    struct Expr *new_elements =
+        (struct Expr *)realloc(list->elements, new_capacity);
+    if (new_elements == NULL) {
+      printf("Failed to reallocate expression list\n");
+      exit(EXIT_FAILURE);
     }
+    list->elements = new_elements;
+    list->capacity = new_capacity;
+  }
   list->elements[list->len++] = expr;
 }
 
-void
-exprvector_cleanup (struct ExprVector *list)
-{
+void exprvector_cleanup(struct ExprVector *list) {
   for (size_t i = 0; i < list->len; i++)
-    expr_cleanup (&list->elements[i]);
-  free (list->elements);
+    expr_cleanup(&list->elements[i]);
+  free(list->elements);
 }
 
-void
-print_indent (int depth)
-{
-  for (int i = 0; i < depth; i++)
-    {
-      printf (" ");
-    }
+void print_indent(int depth) {
+  for (int i = 0; i < depth; i++) {
+    printf(" ");
+  }
 }
 
-void
-print_atom (const struct Atom *atom)
-{
-  if (atom == NULL)
-    {
-      printf ("NULL_ATOM");
-      return;
-    }
+void print_atom(const struct Atom *atom) {
+  if (atom == NULL) {
+    printf("NULL_ATOM");
+    return;
+  }
 
-  switch (atom->type)
-    {
-    case ATOM_TYPE_SYMBOL:
-      printf ("%s", atom->value.symbol);
-      break;
-    case ATOM_TYPE_NUMBER:
-      printf ("%g",
-              atom->value.number); // %g for general floating point format
-      break;
-    case ATOM_TYPE_STRING:
-      printf ("\"%s\"", atom->value.string); // Print with quotes
-      break;
-    default:
-      printf ("<UNKNOWN_ATOM_TYPE>");
-      break;
-    }
+  switch (atom->type) {
+  case ATOM_TYPE_SYMBOL:
+    printf("%s", atom->value.symbol);
+    break;
+  case ATOM_TYPE_NUMBER:
+    printf("%g",
+           atom->value.number); // %g for general floating point format
+    break;
+  case ATOM_TYPE_STRING:
+    printf("\"%s\"", atom->value.string); // Print with quotes
+    break;
+  default:
+    printf("<UNKNOWN_ATOM_TYPE>");
+    break;
+  }
 }
 
-void
-print_exprvector (const struct ExprVector *list, int depth)
-{
-  if (list == NULL)
-    {
-      printf ("NULL_LIST");
-      return;
-    }
+void print_exprvector(const struct ExprVector *list, int depth) {
+  if (list == NULL) {
+    printf("NULL_LIST");
+    return;
+  }
 
-  printf ("(\n");
+  printf("(\n");
 
-  for (size_t i = 0; i < list->len; ++i)
-    {
-      print_indent (depth + 1);
-      print_expr (&list->elements[i], depth + 1);
-      printf ("\n");
-    }
+  for (size_t i = 0; i < list->len; ++i) {
+    print_indent(depth + 1);
+    print_expr(&list->elements[i], depth + 1);
+    printf("\n");
+  }
 
-  print_indent (depth);
-  printf (")");
+  print_indent(depth);
+  printf(")");
 }
 
-void
-print_expr (const struct Expr *expr, int depth)
-{
-  if (expr == NULL)
-    {
-      printf ("NULL_EXPR");
-      return;
-    }
+void print_expr(const struct Expr *expr, int depth) {
+  if (expr == NULL) {
+    printf("NULL_EXPR");
+    return;
+  }
 
-  switch (expr->type)
-    {
-    case S_TYPE_ATOM:
-      print_atom (&expr->val.atom_val);
-      break;
-    case S_TYPE_LIST:
-      print_exprvector (&expr->val.list_val, depth);
-      break;
-    default:
-      printf ("<UNKNOWN_EXPR_TYPE>");
-      break;
-    }
+  switch (expr->type) {
+  case S_TYPE_ATOM:
+    print_atom(&expr->val.atom_val);
+    break;
+  case S_TYPE_LIST:
+    print_exprvector(&expr->val.list_val, depth);
+    break;
+  default:
+    printf("<UNKNOWN_EXPR_TYPE>");
+    break;
+  }
 }
 
-void
-pretty_print_ast (const struct ExprVector *program)
-{
-  if (program == NULL)
-    {
-      printf ("Empty Program AST.\n");
-      return;
-    }
+void pretty_print_ast(const struct ExprVector *program) {
+  if (program == NULL) {
+    printf("Empty Program AST.\n");
+    return;
+  }
 
-  printf ("--- AST Pretty Print ---\n");
-  for (size_t i = 0; i < program->len; ++i)
-    {
-      print_expr (&program->elements[i], 0);
-      printf ("\n");
-    }
-  printf ("------------------------\n");
+  printf("--- AST Pretty Print ---\n");
+  for (size_t i = 0; i < program->len; ++i) {
+    print_expr(&program->elements[i], 0);
+    printf("\n");
+  }
+  printf("------------------------\n");
 }
