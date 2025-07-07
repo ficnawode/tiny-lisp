@@ -74,8 +74,7 @@ int main(int argc, char **argv) {
 
   printf("\nCompilation successful. To run:\n");
   printf("  nasm -f elf64 %s.s\n", output_basename);
-  printf("  gcc -no-pie %s.o runtime.c -o %s\n", output_basename,
-         output_basename);
+  printf("  gcc %s.o runtime.o -o %s.out\n", output_basename, output_basename);
   printf("  ./%s\n", output_basename);
 
   return 0;

@@ -45,6 +45,8 @@ gdb <name of your binary>
 
 If you do not know (or remember) how to use gdb, type in `help`, otherwise [here](https://web.mit.edu/gnu/doc/html/gdb_toc.html) is a guide (hint: set a breakpoint in runtime.c using `b` and then print one of the values using `p`). 
 
+Use `make cleaner` to delete all generated assembly (`.s`), object (`.o`), and binary (`.out`) files.
+
 # Implemented 
 
 - define (local and global)

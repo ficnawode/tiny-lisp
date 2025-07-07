@@ -33,6 +33,6 @@ clean:
 
 cleaner: clean
 	@echo "Cleaning up and deleting all assembly files..."
-	@rm */*.o */*.s
+	@rm */*.o */*.s */*.out
 
 .PHONY: all clean 
